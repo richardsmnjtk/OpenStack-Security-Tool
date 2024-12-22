@@ -11,7 +11,7 @@ Bu script, OpenStack ortamlarınızda **potansiyel güvenlik risklerini** hızla
 2. [Kurulum](#kurulum)
 3. [Kullanım](#kullanım)
 4. [Katkıda Bulunma](#katkıda-bulunma)
-5. [Destek ve İletişim](#destek-ve-iletişim)
+5. [İletişim](#iletişim)
 
 ---
 
@@ -37,7 +37,9 @@ https://mertcankondur.medium.com/openstack-from-a-penetration-tester-perspective
    source admin-openrc.sh
    ```
 
-Bu komut, script’in OpenStack’e admin yetkileriyle erişebilmesi için gereklidir.
+Bu komut, script’in OpenStack’e admin yetkileriyle erişebilmesi için gereklidir. Admin hesabıyla testin gerçekleştirilmesini istediğiniz Region'a girerek aşağıdaki ekran görüntüsündeki gibi ".sh" dosyasını indirebilirsiniz.
+
+<img width="1720" alt="image" src="https://github.com/user-attachments/assets/75ccb2de-7c84-4ead-8712-3fabbb2870b3" />
 
  ---
 
@@ -45,7 +47,7 @@ Bu komut, script’in OpenStack’e admin yetkileriyle erişebilmesi için gerek
 
 Temel Çalıştırma Örneği:
 ```bash
-python openstack_security_tool.py --report-file report.html --json-report --threads 10
+python tool.py --report-file report.html --json-report --threads 10
 ```
 --report-file: HTML raporunun kaydedileceği dosya.
 
@@ -59,7 +61,7 @@ Script çalıştıktan sonra, oluşan HTML raporu (örn. report.html) veya JSON 
 
 Pull request veya issue açarak katkı sağlayabilirsiniz.
 
-## Destek ve İletişim
+## İletişim
 
 Sorularınız veya önerileriniz için GitHub üzerinde bir issue açabilir ya da mertcann.kondur@gmail.com adresinden iletişime geçebilirsiniz. Ayrıca büyük katkılar ve kod değişiklikleri için pull request açmaktan çekinmeyin.
 
