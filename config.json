@@ -1,0 +1,21 @@
+{
+  "SENSITIVE_KEYWORDS": [
+    "password",
+    "secret_key",
+    "auth_token",
+    "private_key",
+    "db_password",
+    "aws_secret_access_key",
+    "pass"
+  ],
+  "CREDENTIAL_KEYWORDS": [
+    "root",
+    "admin",
+    "administrator"
+  ],
+  "ALLOWED_ADMIN_USERS": [
+    "ops_admin",
+    "administrator",
+    "admin"
+  ]
+}
