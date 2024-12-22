@@ -50,12 +50,11 @@ After the script runs, you can review the resulting HTML report (e.g. report.htm
 
 ## Contribution
 
-Pull request veya issue açarak katkı sağlayabilirsiniz.
+You can contribute by opening a pull request or issue.
 
 ## Contact
 
-Sorularınız veya önerileriniz için GitHub üzerinde bir issue açabilir, aşağıdaki mail adresimden veya Linkedin üzerinden iletişime geçebilirsiniz. Ayrıca büyük katkılar ve kod değişiklikleri için pull request açmaktan çekinmeyin.
+For questions or suggestions, you can open an issue on GitHub, contact me at my email below or on Linkedin.
 
 - mertcann.kondur@gmail.com
 - https://www.linkedin.com/in/mertcankondur/
-
