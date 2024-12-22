@@ -1,1 +1,1 @@
-# openstack-security-tool
+# OpenStack Security Tool
