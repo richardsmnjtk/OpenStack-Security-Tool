@@ -17,7 +17,6 @@ logging.basicConfig(level=logging.WARNING, format='%(asctime)s [%(levelname)s]: 
 
 DEFAULT_SENSITIVE_KEYWORDS = ["password", "secret_key", "auth_token", "private_key", "db_password", "aws_secret_access_key", "pass"]
 DEFAULT_CREDENTIAL_KEYWORDS = ["root", "admin", "administrator"]
-# Suspicious patterns logic removed, not needed
 DEFAULT_ALLOWED_ADMIN_USERS = ["ops_admin", "administrator", "admin"]
 
 OUTDATED_PATTERNS = ["14.04", "trusty", "eol", "endoflife"]
@@ -416,13 +415,6 @@ def analyze_instance_issues(instance_data):
 
 def analyze_suspicious_usernames(user_roles):
     issues = []
-    # Yeni mantık:
-    # Admin user:
-    #   - In allowed list => no issue
-    #   - Not in allowed list:
-    #       if 'test' in user => critical
-    #       else => high
-    # Non-admin user => no issue
     for user, role in user_roles:
         user_is_admin = (role.lower() == 'admin')
         if user_is_admin:
@@ -768,8 +760,6 @@ def main():
     parser.add_argument("--threads", type=int, default=5, help="Number of threads for parallel operations")
     args = parser.parse_args()
 
-    # RC dosyasını source etmeli:
-    # source admin-openrc.sh
 
     conn = get_connection()
     all_projects = get_all_projects(conn)
