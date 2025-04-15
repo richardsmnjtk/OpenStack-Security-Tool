@@ -58,3 +58,23 @@ For questions or suggestions, you can open an issue on GitHub, contact me at my 
 
 - mertcann.kondur@gmail.com
 - https://www.linkedin.com/in/mertcankondur/
+
+### Recent Improvements and Features
+- **Enhanced Report Generation**
+  - Interactive search across all report sections with real-time filtering
+  - Comprehensive metadata display including instance details, security groups, and user roles
+  - Clear severity-based categorization (Critical, High, Medium, Low)
+  - Improved visual hierarchy and readability
+
+- **Robust Error Handling**
+  - Better project selection validation
+  - Improved OpenStack container operations
+  - Enhanced handling of missing data scenarios
+  - Clear error messages and warnings
+
+- **Performance Optimizations**
+  - Parallel processing for bucket operations
+  - Thread-based scanning capabilities
+  - Efficient report generation
+  - Optimized data collection
+![image](https://github.com/user-attachments/assets/8e42ae47-6f46-48d5-af54-60f25674dfdf)
