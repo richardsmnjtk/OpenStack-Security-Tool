@@ -1,43 +1,65 @@
+"""
+OpenStack Security Assessment Tool
+A comprehensive security scanning tool for OpenStack environments.
+"""
+
+# Standard library imports
 import subprocess
 import json
-import openstack
 import logging
 import argparse
-from concurrent.futures import ThreadPoolExecutor
-from string import Template
-from datetime import datetime
-from colorama import init, Fore, Style
 import sys
-import ipaddress
 import os
 import re
+from datetime import datetime
+from string import Template
+from concurrent.futures import ThreadPoolExecutor
+import ipaddress
 
+# Third-party imports
+import openstack
+from colorama import init, Fore, Style
+
+# Initialize colorama for cross-platform colored output
 init(autoreset=True)
-logging.basicConfig(level=logging.WARNING, format='%(asctime)s [%(levelname)s]: %(message)s')
 
-DEFAULT_SENSITIVE_KEYWORDS = ["password", "secret_key", "auth_token", "private_key", "db_password", "aws_secret_access_key", "pass"]
-DEFAULT_CREDENTIAL_KEYWORDS = ["root", "admin", "administrator"]
-DEFAULT_ALLOWED_ADMIN_USERS = ["ops_admin", "administrator", "admin"]
+# Configure logging
+logging.basicConfig(
+    level=logging.WARNING,
+    format='%(asctime)s [%(levelname)s]: %(message)s'
+)
 
+# Constants and Configuration
+# ---------------------------
+
+# Default security keywords and patterns
+DEFAULT_SENSITIVE_KEYWORDS = [
+    "password",
+    "secret_key",
+    "auth_token",
+    "private_key",
+    "db_password",
+    "aws_secret_access_key",
+    "pass"
+]
+
+DEFAULT_CREDENTIAL_KEYWORDS = [
+    "root",
+    "admin",
+    "administrator"
+]
+
+DEFAULT_ALLOWED_ADMIN_USERS = [
+    "ops_admin",
+    "administrator",
+    "admin"
+]
+
+# Security patterns and ports
 OUTDATED_PATTERNS = ["14.04", "trusty", "eol", "endoflife"]
 KNOWN_HARMLESS_KEYS = ["root_device_name", "is_public"]
-
-network_info_cache = {}
-
-def load_config():
-    if os.path.exists("config.json"):
-        with open("config.json","r") as f:
-            cfg = json.load(f)
-        sens = cfg.get("SENSITIVE_KEYWORDS", DEFAULT_SENSITIVE_KEYWORDS)
-        cred = cfg.get("CREDENTIAL_KEYWORDS", DEFAULT_CREDENTIAL_KEYWORDS)
-        allowed_admin = cfg.get("ALLOWED_ADMIN_USERS", DEFAULT_ALLOWED_ADMIN_USERS)
-        return sens, cred, allowed_admin
-    else:
-        return DEFAULT_SENSITIVE_KEYWORDS, DEFAULT_CREDENTIAL_KEYWORDS, DEFAULT_ALLOWED_ADMIN_USERS
-
-SENSITIVE_KEYWORDS, CREDENTIAL_KEYWORDS, ALLOWED_ADMIN_USERS = load_config()
-
 MANAGEMENT_PORTS = [22, 443, 3389]
+
 SENSITIVE_PATTERNS_CRITICAL = [
     "BEGIN RSA PRIVATE KEY",
     "BEGIN OPENSSH PRIVATE KEY",
@@ -45,10 +67,287 @@ SENSITIVE_PATTERNS_CRITICAL = [
     "AKIA"
 ]
 
+# Global cache for network information
+network_info_cache = {}
+
+HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenStack Security Assessment Report</title>
+    <style>
+        :root {
+            --critical-color: #dc3545;
+            --high-color: #fd7e14;
+            --medium-color: #ffc107;
+            --low-color: #0dcaf0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f8f9fa;
+        }
+
+        .header {
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            color: #2c3e50;
+            margin: 0;
+            font-size: 2em;
+        }
+
+        .timestamp {
+            color: #6c757d;
+            font-size: 0.9em;
+            margin-top: 10px;
+        }
+
+        .search-container {
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        #searchBox {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 1em;
+        }
+
+        .severity-legend {
+            background-color: #fff;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .severity-legend ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+
+        .severity-legend li {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .issues-container {
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .issues-section {
+            margin-bottom: 30px;
+        }
+
+        .issues-section h2 {
+            color: #2c3e50;
+            border-bottom: 2px solid #eee;
+            padding-bottom: 10px;
+            margin-bottom: 15px;
+        }
+
+        .issues-list {
+            list-style: none;
+            padding: 0;
+        }
+
+        .issues-list li {
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+            background-color: #f8f9fa;
+            transition: background-color 0.2s;
+        }
+
+        .issues-list li:hover {
+            background-color: #e9ecef;
+        }
+
+        .critical { color: var(--critical-color); font-weight: bold; }
+        .high { color: var(--high-color); font-weight: bold; }
+        .medium { color: var(--medium-color); }
+        .low { color: var(--low-color); }
+
+        #gototop {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background-color: #fff;
+            color: #333;
+            padding: 10px 15px;
+            border-radius: 4px;
+            text-decoration: none;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            display: none;
+            transition: background-color 0.2s;
+        }
+
+        #gototop:hover {
+            background-color: #f8f9fa;
+        }
+
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+            
+            .severity-legend ul {
+                flex-direction: column;
+                gap: 10px;
+            }
+        }
+
+        $additional_css
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>OpenStack Security Assessment Report</h1>
+        <div class="timestamp">Generated: $timestamp</div>
+    </div>
+
+    <div class="severity-legend">
+        <h2>Severity Levels</h2>
+        <ul>
+            <li><span class="critical">● Critical:</span> Immediate action required</li>
+            <li><span class="high">● High:</span> Address as soon as possible</li>
+            <li><span class="medium">● Medium:</span> Review and plan remediation</li>
+            <li><span class="low">● Low:</span> Consider improvements</li>
+        </ul>
+    </div>
+
+    <div class="search-container">
+        <input type="text" id="searchBox" placeholder="Search issues..." onkeyup="searchIssues()">
+    </div>
+
+    <div class="issues-container">
+        <h2>Potential Issues</h2>
+        $issues_html
+    </div>
+
+    <div class="projects-container">
+        $projects_html
+    </div>
+
+    <a id="gototop" href="#top">↑ Top</a>
+
+    <script>
+        function searchIssues() {
+            const input = document.getElementById('searchBox');
+            const filter = input.value.toLowerCase();
+            const sections = document.querySelectorAll('.issues-section, .project-section, .instances-section, .security-groups-section, .buckets-section, .user-roles-section');
+            
+            sections.forEach(section => {
+                const items = section.getElementsByTagName('li');
+                const paragraphs = section.getElementsByTagName('p');
+                let sectionHasVisibleItems = false;
+                
+                // Search in list items
+                for (let item of items) {
+                    const text = item.textContent || item.innerText;
+                    const matches = text.toLowerCase().indexOf(filter) > -1;
+                    item.style.display = matches ? '' : 'none';
+                    if (matches) sectionHasVisibleItems = true;
+                }
+                
+                // Search in paragraphs
+                for (let p of paragraphs) {
+                    const text = p.textContent || p.innerText;
+                    const matches = text.toLowerCase().indexOf(filter) > -1;
+                    p.style.display = matches ? '' : 'none';
+                    if (matches) sectionHasVisibleItems = true;
+                }
+
+                // Show/hide section headers based on matches
+                const headers = section.querySelectorAll('h2, h3, h4, h5');
+                headers.forEach(header => {
+                    const headerText = header.textContent || header.innerText;
+                    const headerMatches = headerText.toLowerCase().indexOf(filter) > -1;
+                    header.style.display = (filter === '' || sectionHasVisibleItems || headerMatches) ? '' : 'none';
+                });
+
+                // Show/hide entire section
+                section.style.display = (filter === '' || sectionHasVisibleItems) ? '' : 'none';
+            });
+        }
+
+        window.onscroll = function() {
+            const topButton = document.getElementById("gototop");
+            if (document.body.scrollTop > 100 || document.documentElement.scrollTop > 100) {
+                topButton.style.display = "block";
+            } else {
+                topButton.style.display = "none";
+            }
+        };
+    </script>
+</body>
+</html>
+"""
+
+def load_config():
+    """
+    Load security configuration from config.json file.
+    Returns tuple of (sensitive_keywords, credential_keywords, allowed_admin_users).
+    Falls back to default values if config file doesn't exist or is invalid.
+    """
+    try:
+        if os.path.exists("config.json"):
+            with open("config.json", "r") as f:
+                cfg = json.load(f)
+            return (
+                cfg.get("SENSITIVE_KEYWORDS", DEFAULT_SENSITIVE_KEYWORDS),
+                cfg.get("CREDENTIAL_KEYWORDS", DEFAULT_CREDENTIAL_KEYWORDS),
+                cfg.get("ALLOWED_ADMIN_USERS", DEFAULT_ALLOWED_ADMIN_USERS)
+            )
+    except (json.JSONDecodeError, IOError) as e:
+        logging.warning(f"Error loading config.json: {e}. Using default values.")
+    
+    return DEFAULT_SENSITIVE_KEYWORDS, DEFAULT_CREDENTIAL_KEYWORDS, DEFAULT_ALLOWED_ADMIN_USERS
+
+# Load configuration
+SENSITIVE_KEYWORDS, CREDENTIAL_KEYWORDS, ALLOWED_ADMIN_USERS = load_config()
+
 def get_connection(project_name=None):
     return openstack.connect(project_name=project_name) if project_name else openstack.connect()
 
 def user_select_projects(projects):
+    """
+    Allow user to select projects to scan.
+    Args:
+        projects: List of available projects
+    Returns:
+        List of selected projects
+    """
+    if not projects:
+        logging.error("No projects available for selection")
+        return []
+
     banner_text = Fore.MAGENTA + r"""
 
  ██████╗ ██████╗ ███████╗███╗   ██╗███████╗████████╗ █████╗  ██████╗██╗  ██╗                         
@@ -72,12 +371,34 @@ def user_select_projects(projects):
         print(Fore.YELLOW + f"{idx}. {project['name']}")
     print(Fore.YELLOW + "A. Select All Projects")
 
-    print(Fore.GREEN + "\nEnter the numbers of projects to scan, separated by commas (e.g., 1,3,5 or 'A' for all): ", end="")
-    selection = input().strip()
-    if selection.lower() == 'a':
-        return projects
-    selected_indexes = [int(idx.strip()) - 1 for idx in selection.split(",") if idx.strip().isdigit()]
-    return [projects[idx] for idx in selected_indexes if 0 <= idx < len(projects)]
+    while True:
+        try:
+            print(Fore.GREEN + "\nEnter the numbers of projects to scan, separated by commas (e.g., 1,3,5 or 'A' for all): ", end="")
+            selection = input().strip().lower()
+            
+            if selection == 'a':
+                return projects
+            
+            selected_indexes = []
+            for idx in selection.split(","):
+                idx = idx.strip()
+                if not idx.isdigit():
+                    raise ValueError(f"Invalid input: {idx}")
+                
+                num = int(idx)
+                if num < 1 or num > len(projects):
+                    raise ValueError(f"Project number {num} is out of range")
+                
+                selected_indexes.append(num - 1)
+            
+            return [projects[idx] for idx in selected_indexes]
+            
+        except ValueError as e:
+            print(Fore.RED + f"Error: {e}")
+            print(Fore.YELLOW + "Please try again.")
+        except Exception as e:
+            print(Fore.RED + f"Unexpected error: {e}")
+            print(Fore.YELLOW + "Please try again.")
 
 def get_all_projects(conn):
     return [{"id": project.id, "name": project.name} for project in conn.identity.projects()]
@@ -285,43 +606,83 @@ def fetch_security_groups(conn, project_id):
     return security_groups_info
 
 def fetch_bucket_details(project_id, bucket_name):
-    bucket_details = run_openstack_command(
-        ["openstack", "container", "show", "--os-project-id", project_id, bucket_name, "-f", "json"]
-    )
-    if not bucket_details:
-        return None
-    read_acl = bucket_details.get('read_acl', '').strip()
-    write_acl = bucket_details.get('write_acl', '').strip() if 'write_acl' in bucket_details else ''
-    if ".r:*" in read_acl or read_acl == "*":
-        if "*" in write_acl or ".r:*" in write_acl:
-            bucket_severity = "critical"
+    """
+    Fetch details for a specific bucket.
+    Args:
+        project_id: Project ID
+        bucket_name: Name of the bucket
+    Returns:
+        Dictionary containing bucket details or None if failed
+    """
+    try:
+        bucket_details = run_openstack_command(
+            ["openstack", "container", "show", "--os-project-id", project_id, bucket_name, "-f", "json"]
+        )
+        if not bucket_details:
+            logging.warning(f"Failed to fetch details for bucket {bucket_name}")
+            return None
+
+        read_acl = bucket_details.get('read_acl', '').strip()
+        write_acl = bucket_details.get('write_acl', '').strip() if 'write_acl' in bucket_details else ''
+        
+        if ".r:*" in read_acl or read_acl == "*":
+            if "*" in write_acl or ".r:*" in write_acl:
+                bucket_severity = "critical"
+            else:
+                bucket_severity = "high"
+            is_public = "red"
         else:
-            bucket_severity = "high"
-        is_public = "red"
-    else:
-        is_public = "green"
-        bucket_severity = "low"
-    return {"bucket_name": bucket_name, "is_public": is_public, "bucket_severity": bucket_severity}
+            is_public = "green"
+            bucket_severity = "low"
+            
+        return {
+            "bucket_name": bucket_name,
+            "is_public": is_public,
+            "bucket_severity": bucket_severity
+        }
+    except Exception as e:
+        logging.warning(f"Error fetching bucket details for {bucket_name}: {e}")
+        return None
 
 def fetch_buckets(selected_projects, threads=5):
+    """
+    Fetch bucket information for selected projects.
+    Args:
+        selected_projects: List of selected projects
+        threads: Number of threads for parallel processing
+    Returns:
+        List of bucket information
+    """
     buckets_info = []
     for project in selected_projects:
         project_id = project['id']
         project_name = project['name']
-        bucket_list_result = run_openstack_command(
-            ["openstack", "container", "list", "--os-project-id", project_id, "-f", "json"]
-        )
-        if not bucket_list_result:
+        
+        try:
+            bucket_list_result = run_openstack_command(
+                ["openstack", "container", "list", "--os-project-id", project_id, "-f", "json"]
+            )
+            if not bucket_list_result:
+                logging.warning(f"No buckets found for project {project_name}")
+                continue
+
+            with ThreadPoolExecutor(max_workers=threads) as executor:
+                future_to_bucket = {
+                    executor.submit(fetch_bucket_details, project_id, b['Name']): b['Name']
+                    for b in bucket_list_result
+                }
+                for future in future_to_bucket:
+                    try:
+                        bucket_details = future.result()
+                        if bucket_details:
+                            buckets_info.append({**bucket_details, "project_name": project_name})
+                    except Exception as e:
+                        logging.warning(f"Error processing bucket {future_to_bucket[future]}: {e}")
+                        
+        except Exception as e:
+            logging.warning(f"Error fetching buckets for project {project_name}: {e}")
             continue
-        with ThreadPoolExecutor(max_workers=threads) as executor:
-            future_to_bucket = {
-                executor.submit(fetch_bucket_details, project_id, b['Name']): b['Name']
-                for b in bucket_list_result
-            }
-            for future in future_to_bucket:
-                bucket_details = future.result()
-                if bucket_details:
-                    buckets_info.append({**bucket_details, "project_name": project_name})
+            
     return buckets_info
 
 def fetch_user_roles(conn, project_id):
@@ -541,156 +902,99 @@ def analyze_issues(data):
     return issues
 
 def generate_json_report(issues_data, output_file="report.json"):
-    json_data = {}
-    for sev in issues_data:
-        json_data[sev] = issues_data[sev]
-    with open(output_file, "w") as f:
-        json.dump(json_data, f, indent=4)
-    print(f"JSON report generated: {output_file}")
+    """
+    Generate a JSON report of security findings.
+    Args:
+        issues_data: Dictionary containing scan results
+        output_file: Path to save the JSON report
+    """
+    if not issues_data:
+        logging.warning("No issues data to generate JSON report")
+        return
+
+    try:
+        with open(output_file, "w") as f:
+            json.dump(issues_data, f, indent=4)
+        print(f"JSON report generated: {output_file}")
+    except Exception as e:
+        logging.error(f"Failed to generate JSON report: {e}")
 
 def generate_html_report(data, output_file="report.html"):
+    """
+    Generate an HTML report of security findings.
+    Args:
+        data: Dictionary containing scan results
+        output_file: Path to save the HTML report
+    """
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     issues_data = analyze_issues(data)
 
-    severity_legend = """
-<p><strong>Severity Legend:</strong></p>
-<ul>
-<li><span class='critical'>Critical:</span> Immediate action required, severe exposure.</li>
-<li><span class='high'>High:</span> High risk, address as soon as possible.</li>
-<li><span class='medium'>Medium:</span> Moderate risk, review timely.</li>
-<li><span class='low'>Low:</span> Low risk, consider improvements.</li>
-</ul>
-"""
-
-    search_box = """
-<div>
-<input type="text" id="searchBox" placeholder="Search issues..." onkeyup="searchIssues()" />
-</div>
-<script>
-function searchIssues() {
-    var input = document.getElementById('searchBox');
-    var filter = input.value.toLowerCase();
-    var lists = document.getElementsByTagName('li');
-    for (var i = 0; i < lists.length; i++) {
-        var txtValue = lists[i].textContent || lists[i].innerText;
-        if (txtValue.toLowerCase().indexOf(filter) > -1) {
-            lists[i].style.display = '';
-        } else {
-            lists[i].style.display = 'none';
-        }
-    }
-}
-</script>
-"""
-
-    script_js = """
-<script>
-window.onscroll = function() {
-    var topButton = document.getElementById("gototop");
-    if (document.body.scrollTop > 100 || document.documentElement.scrollTop > 100) {
-        topButton.style.display = "block";
-    } else {
-        topButton.style.display = "none";
-    }
-};
-</script>
-"""
-
-    template_html = Template(f"""
-<html>
-<head>
-<title>OpenStack Pentest Report</title>
-<style>
-    body {{font-family: Arial, sans-serif; font-size: 14px;}}
-    h1,h2,h3,h4,h5 {{font-family: Arial, sans-serif;}}
-    ul {{list-style: disc; margin-left: 20px;}}
-    .red {{color: red;}}
-    .green {{color: green;}}
-    .orange {{color: orange;}}
-    .issues {{border: 1px solid #ccc; padding: 10px; margin-top:20px; background-color: #fafafa;}}
-    h2.issues-title {{color: #000;}}
-    .critical {{color: #B22222;}}
-    .high {{color: red;}}
-    .medium {{color: orange;}}
-    .low {{color: blue;}}
-    #top {{margin-bottom:20px;}}
-    #gototop {{
-        position: fixed;
-        bottom: 20px;
-        right: 20px;
-        background: #eee;
-        border: 1px solid #ccc;
-        padding: 10px;
-        text-decoration: none;
-        color: #333;
-        font-weight: bold;
-        border-radius: 5px;
-        display: none;
-    }}
-    #gototop:hover {{
-        background: #ddd;
-    }}
-</style>
-{script_js}
-</head>
-<body>
-<div id="top"></div>
-<h1>OpenStack Pentest Report</h1>
-<p>Report generated at: $timestamp</p>
-{severity_legend}
-{search_box}
-<div class="issues">
-<h2 class="issues-title">Potential Issues</h2>
-$issues_html
-</div>
-
-$projects_html
-
-<a id="gototop" href="#top">↑ Top</a>
-
-</body>
-</html>
-""")
-
+    # Generate issues HTML
     issues_html = ""
-    has_issues = False
-    severity_order = [("critical", "critical"), ("high", "high"), ("medium", "medium"), ("low", "low")]
-    issues_data = analyze_issues(data)
-    for sev_level, sev_class in severity_order:
-        if issues_data[sev_level]:
-            has_issues = True
-            issues_html += f"<h3 class='{sev_class}'>{sev_level.capitalize()} Issues:</h3><ul>"
-            for issue in issues_data[sev_level]:
-                issues_html += f"<li>{issue}</li>"
-            issues_html += "</ul>"
+    for severity in ["critical", "high", "medium", "low"]:
+        if issues_data[severity]:
+            issues_html += f"""
+            <div class="issues-section">
+                <h2 class="{severity}">{severity.title()} Issues</h2>
+                <ul class="issues-list">
+                    {''.join(f'<li class="{severity}">{issue}</li>' for issue in issues_data[severity])}
+                </ul>
+            </div>
+            """
 
-    if not has_issues:
-        issues_html = "<p>No potential issues found.</p>"
-
+    # Generate project details HTML
     projects_html = ""
     for project, details in data.items():
         project_id = details['project_id']
         proj_id_html = project_id.replace(" ", "_")
 
-        projects_html += f'<h2 id="{proj_id_html}">Project: {project}</h2>'
+        projects_html += f"""
+        <div class="project-section">
+            <h2 id="{proj_id_html}">Project: {project}</h2>
+        """
 
         # Instances
-        projects_html += f"<h3 id='{proj_id_html}_instances'>Instances</h3>"
+        projects_html += f"""
+            <div class="instances-section">
+                <h3 id='{proj_id_html}_instances'>Instances</h3>
+        """
         if not details.get('instances'):
             projects_html += "<p>No instances found.</p>"
-        for instance in details.get('instances', []):
-            instance_id = instance.get('ID', 'Unknown')
-            instance_name = instance.get('Name', 'Unknown')
-            inst_anchor = f"{proj_id_html}_instance_{instance_id}"
-            projects_html += f'<h4 id="{inst_anchor}">Instance: {instance_name} ({instance_id})</h4>'
-            metadata = instance.get('metadata', {})
-            projects_html += "<h5>Metadata:</h5><ul>"
-            for key, value in metadata.items():
-                projects_html += f"<li>{key}: {value}</li>"
-            projects_html += "</ul>"
+        else:
+            for instance in details.get('instances', []):
+                instance_id = instance.get('ID', 'Unknown')
+                instance_name = instance.get('Name', 'Unknown')
+                inst_anchor = f"{proj_id_html}_instance_{instance_id}"
+                metadata = instance.get('metadata', {})
+                
+                projects_html += f"""
+                    <div class="instance-details">
+                        <h4 id="{inst_anchor}">Instance: {instance_name} ({instance_id})</h4>
+                        <div class="metadata">
+                            <h5>Metadata:</h5>
+                            <ul>
+                """
+                
+                # Sort metadata for better readability
+                sorted_metadata = sorted(metadata.items())
+                for key, value in sorted_metadata:
+                    if isinstance(value, dict):
+                        value = json.dumps(value, indent=2)
+                    projects_html += f"<li><strong>{key}:</strong> {value}</li>"
+                
+                projects_html += """
+                            </ul>
+                        </div>
+                    </div>
+                """
+
+        projects_html += "</div>"  # Close instances-section
 
         # Security Groups
-        projects_html += f"<h3 id='{proj_id_html}_security_groups'>Security Groups</h3>"
+        projects_html += f"""
+            <div class="security-groups-section">
+                <h3 id='{proj_id_html}_security_groups'>Security Groups</h3>
+        """
         sgs = details.get('security_groups', [])
         if not sgs:
             projects_html += "<p>No security groups found.</p>"
@@ -699,22 +1003,33 @@ $projects_html
                 sg_id = sg['group_id']
                 sg_name = sg['group_name']
                 sg_anchor = f"{proj_id_html}_sg_{sg_id}"
-                projects_html += f'<h4 id="{sg_anchor}">Security Group: {sg_name} (ID: {sg_id})</h4>'
+                projects_html += f"""
+                    <div class="security-group-details">
+                        <h4 id="{sg_anchor}">Security Group: {sg_name} (ID: {sg_id})</h4>
+                """
+                
                 if not sg['risky_rules']:
                     projects_html += "<p>No risky rules found.</p>"
                 else:
-                    projects_html += "<ul>"
+                    projects_html += "<ul class='security-rules'>"
                     for rule in sg['risky_rules']:
                         tooltip = f"Direction: {rule['direction']}, Port: {rule['port_range']}"
-                        projects_html += (
-                            f"<li class='{rule['level']}' title='{tooltip}'>"
-                            f"IP={rule['remote_ip_prefix']} Protocol={rule['protocol']} Level={rule['level']}<br>"
-                            f"<i>{rule['advice']}</i></li>"
-                        )
+                        projects_html += f"""
+                            <li class='{rule["level"]}' title='{tooltip}'>
+                                IP={rule['remote_ip_prefix']} Protocol={rule['protocol']} Level={rule['level']}<br>
+                                <em>{rule['advice']}</em>
+                            </li>
+                        """
                     projects_html += "</ul>"
+                projects_html += "</div>"
+        
+        projects_html += "</div>"  # Close security-groups-section
 
         # Buckets
-        projects_html += f"<h3 id='{proj_id_html}_buckets'>Buckets</h3>"
+        projects_html += f"""
+            <div class="buckets-section">
+                <h3 id='{proj_id_html}_buckets'>Buckets</h3>
+        """
         bucket_list = details.get('buckets', [])
         if not bucket_list:
             projects_html += "<p>No buckets found.</p>"
@@ -724,33 +1039,108 @@ $projects_html
                 bucket_anchor = f"{proj_id_html}_bucket_{bucket_name}"
                 bucket_color = bucket['is_public']
                 bucket_sev = bucket['bucket_severity']
-                projects_html += f'<h4 id="{bucket_anchor}">Bucket: {bucket_name}</h4>'
+                projects_html += f"""
+                    <div class="bucket-details">
+                        <h4 id="{bucket_anchor}">Bucket: {bucket_name}</h4>
+                """
                 if bucket_sev == "critical":
-                    projects_html += f"<p class='red'>This bucket is Public with Write Access (Critical severity)</p>"
+                    projects_html += f"<p class='critical'>This bucket is Public with Write Access (Critical severity)</p>"
                 elif bucket_sev == "high":
-                    projects_html += f"<p class='red'>This bucket is Public (High severity)</p>"
+                    projects_html += f"<p class='high'>This bucket is Public (High severity)</p>"
                 else:
-                    projects_html += f"<p class='{bucket_color}'>This bucket is Not Public</p>"
+                    projects_html += f"<p class='low'>This bucket is Not Public</p>"
+                projects_html += "</div>"
+        
+        projects_html += "</div>"  # Close buckets-section
 
         # User Roles
-        projects_html += f"<h3 id='{proj_id_html}_user_roles'>User Roles</h3>"
+        projects_html += f"""
+            <div class="user-roles-section">
+                <h3 id='{proj_id_html}_user_roles'>User Roles</h3>
+        """
         user_roles = details.get('user_roles', [])
         if not user_roles:
             projects_html += "<p>No user roles found.</p>"
         else:
-            projects_html += "<ul>"
+            projects_html += "<ul class='user-roles-list'>"
             for user, role in user_roles:
                 user_anchor = f"{proj_id_html}_user_{user}"
-                color = "red" if role.lower() == 'admin' else "green"
-                projects_html += f'<li id="{user_anchor}">{user}: <span class="{color}">{role}</span></li>'
+                role_class = "critical" if role.lower() == 'admin' else "low"
+                projects_html += f'<li id="{user_anchor}">{user}: <span class="{role_class}">{role}</span></li>'
             projects_html += "</ul>"
+        
+        projects_html += "</div>"  # Close user-roles-section
+        projects_html += "</div>"  # Close project-section
 
-    html_content = template_html.substitute(timestamp=timestamp, projects_html=projects_html, issues_html=issues_html)
+    # Update CSS for new sections
+    additional_css = """
+        .instance-details, .security-group-details, .bucket-details {
+            background-color: #f8f9fa;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 4px;
+            border-left: 4px solid #dee2e6;
+        }
 
-    with open(output_file, "w") as file:
-        file.write(html_content)
+        .metadata ul {
+            list-style: none;
+            padding-left: 20px;
+        }
+
+        .metadata li {
+            margin: 5px 0;
+            word-break: break-word;
+        }
+
+        .security-rules li {
+            margin: 10px 0;
+            padding: 10px;
+            background-color: #fff;
+            border-radius: 4px;
+        }
+
+        .user-roles-list li {
+            margin: 5px 0;
+        }
+
+        .project-section {
+            margin-top: 40px;
+            padding: 20px;
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        h3 {
+            color: #2c3e50;
+            margin-top: 25px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #eee;
+        }
+
+        h4 {
+            color: #34495e;
+            margin-top: 15px;
+        }
+
+        .metadata h5 {
+            color: #455a64;
+            margin: 10px 0;
+        }
+    """
+
+    # Use the HTML_TEMPLATE
+    template = Template(HTML_TEMPLATE)
+    
+    with open(output_file, "w") as f:
+        f.write(template.substitute(
+            timestamp=timestamp,
+            issues_html=issues_html,
+            projects_html=projects_html,
+            additional_css=additional_css
+        ))
+    
     print(f"HTML report generated: {output_file}")
-
     return issues_data
 
 def main():
@@ -760,16 +1150,35 @@ def main():
     parser.add_argument("--threads", type=int, default=5, help="Number of threads for parallel operations")
     args = parser.parse_args()
 
+    try:
+        conn = get_connection()
+        all_projects = get_all_projects(conn)
+        
+        if not all_projects:
+            logging.error("No projects found. Please check your OpenStack connection and credentials.")
+            return
 
-    conn = get_connection()
-    all_projects = get_all_projects(conn)
-    selected_projects = user_select_projects(all_projects)
+        print(f"Found {len(all_projects)} projects")
+        selected_projects = user_select_projects(all_projects)
+        
+        if not selected_projects:
+            logging.error("No projects selected. Exiting.")
+            return
 
-    data = fetch_data(conn, selected_projects, threads=args.threads)
-    issues_data = generate_html_report(data, args.report_file)
+        data = fetch_data(conn, selected_projects, threads=args.threads)
+        if not data:
+            logging.error("No data collected. Please check your OpenStack connection and permissions.")
+            return
 
-    if args.json_report:
-        generate_json_report(issues_data, "report.json")
+        issues_data = analyze_issues(data)
+        generate_html_report(data, args.report_file)
+
+        if args.json_report:
+            generate_json_report(issues_data, "report.json")
+
+    except Exception as e:
+        logging.error(f"An error occurred: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
