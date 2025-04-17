@@ -77,4 +77,5 @@ For questions or suggestions, you can open an issue on GitHub, contact me at my 
   - Thread-based scanning capabilities
   - Efficient report generation
   - Optimized data collection
+
 ![image](https://github.com/user-attachments/assets/8e42ae47-6f46-48d5-af54-60f25674dfdf)
